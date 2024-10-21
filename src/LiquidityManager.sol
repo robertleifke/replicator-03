@@ -1,40 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.13;
 
-import {IStandardizedYield} from "pendle/interfaces/IStandardizedYield.sol";
-import {PYIndexLib, PYIndex} from "pendle/core/StandardizedYield/PYIndex.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 import {SafeTransferLib, ERC20} from "solmate/utils/SafeTransferLib.sol";
 
-import {RMM, IPYieldToken, Gaussian, computeTradingFunction} from "./RMM.sol";
-import {InvalidTokenIn, InsufficientSYMinted} from "./lib/RmmErrors.sol";
+import {Gaussian, computeTradingFunction} from "./RMM.sol";
+import {InsufficientTokenMinted} from "./lib/RmmErrors.sol";
 
 contract LiquidityManager {
-    using PYIndexLib for PYIndex;
-    using PYIndexLib for IPYieldToken;
     using FixedPointMathLib for uint256;
     using SafeTransferLib for ERC20;
 
-    function mintSY(address SY, address receiver, address tokenIn, uint256 amountTokenToDeposit, uint256 minSharesOut)
+    function mintToken(address token, address receiver, address tokenIn, uint256 amountTokenToDeposit, uint256 minTokensOut)
         public
         payable
         returns (uint256 amountOut)
     {
-        IStandardizedYield sy = IStandardizedYield(SY);
-        if (!sy.isValidTokenIn(tokenIn)) revert InvalidTokenIn(tokenIn);
-
-        if (msg.value > 0 && sy.isValidTokenIn(address(0))) {
-            // SY minted check is done in this function instead of relying on the SY contract's deposit().
-            amountOut += sy.deposit{value: msg.value}(address(this), address(0), msg.value, 0);
+        // Implementation depends on your specific requirements
+        // This is a placeholder
+        if (msg.value > 0) {
+            // Handle ETH deposits
         }
 
         if (tokenIn != address(0)) {
             ERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountTokenToDeposit);
-            amountOut += sy.deposit(receiver, tokenIn, amountTokenToDeposit, 0);
+            // Implement token minting logic here
         }
 
-        if (amountOut < minSharesOut) {
-            revert InsufficientSYMinted(amountOut, minSharesOut);
+        if (amountOut < minTokensOut) {
+            revert InsufficientTokenMinted(amountOut, minTokensOut);
         }
     }
 
@@ -47,76 +41,9 @@ contract LiquidityManager {
         uint256 epsilon;
     }
 
-    function allocateFromSy(AllocateArgs calldata args) external returns (uint256 liquidity) {
-        RMM rmm = RMM(payable(args.rmm));
-
-        ERC20 sy = ERC20(address(rmm.SY()));
-        ERC20 pt = ERC20(address(rmm.PT()));
-
-        PYIndex index = IPYieldToken(rmm.YT()).newIndex();
-        uint256 rX = rmm.reserveX();
-        uint256 rY = rmm.reserveY();
-
-        // validate swap approximation
-        (uint256 syToSwap,) = computeSyToPtToAddLiquidity(
-            ComputeArgs({
-                rmm: args.rmm,
-                rX: rX,
-                rY: rY,
-                index: index,
-                maxIn: args.amountIn,
-                blockTime: block.timestamp,
-                initialGuess: args.initialGuess,
-                epsilon: args.epsilon
-            })
-        );
-
-        // transfer all sy in
-        sy.safeTransferFrom(msg.sender, address(this), args.amountIn);
-        sy.approve(address(args.rmm), args.amountIn);
-
-        // swap syToSwap for pt
-        rmm.swapExactSyForPt(syToSwap, args.minOut, address(this));
-        uint256 syBal = sy.balanceOf(address(this));
-        sy.approve(address(args.rmm), syBal);
-        uint256 ptBal = pt.balanceOf(address(this));
-
-        pt.approve(address(args.rmm), ptBal);
-        liquidity = rmm.allocate(true, syBal, args.minLiquidityDelta, msg.sender);
-    }
-
-    function allocateFromPt(AllocateArgs calldata args) external returns (uint256 liquidity) {
-        RMM rmm = RMM(payable(args.rmm));
-        ERC20 sy = ERC20(address(rmm.SY()));
-        ERC20 pt = ERC20(address(rmm.PT()));
-
-        PYIndex index = IPYieldToken(rmm.YT()).newIndex();
-        uint256 rX = rmm.reserveX();
-        uint256 rY = rmm.reserveY();
-
-        // validate swap approximation
-        (uint256 ptToSwap,) = computePtToSyToAddLiquidity(
-            ComputeArgs({
-                rmm: args.rmm,
-                rX: rX,
-                rY: rY,
-                index: index,
-                maxIn: args.amountIn,
-                blockTime: block.timestamp,
-                initialGuess: args.initialGuess,
-                epsilon: args.epsilon
-            })
-        );
-
-        // transfer all pt in
-        pt.safeTransferFrom(msg.sender, address(this), args.amountIn);
-        pt.approve(address(rmm), args.amountIn);
-
-        // swap ptToSwap for sy
-        (uint256 syOut,) = rmm.swapExactPtForSy(ptToSwap, args.minOut, address(this));
-
-        sy.approve(address(rmm), type(uint256).max);
-        liquidity = rmm.allocate(false, pt.balanceOf(address(this)), args.minLiquidityDelta, msg.sender);
+    function allocateFromToken(AllocateArgs calldata args) external returns (uint256 liquidity) {
+        // Implementation depends on your specific RMM contract
+        // This is a placeholder
     }
 
     struct ComputeArgs {
@@ -179,7 +106,7 @@ contract LiquidityManager {
         return b.mulWadDown(1 ether - eps) <= a && a <= b.mulWadDown(1 ether + eps);
     }
 
-    function calcMaxPtOut(
+    function calcMaxTokenOut(
         uint256 reserveX_,
         uint256 reserveY_,
         uint256 totalLiquidity_,
@@ -191,9 +118,8 @@ contract LiquidityManager {
         
         uint256 maxProportion = uint256(int256(1e18) - currentTF) * 1e18 / (2 * 1e18);
         
-        uint256 maxPtOut = reserveY_ * maxProportion / 1e18;
+        uint256 maxTokenOut = reserveY_ * maxProportion / 1e18;
         
-        return (maxPtOut * 999) / 1000;
+        return (maxTokenOut * 999) / 1000;
     }
-
 }

@@ -14,11 +14,11 @@ contract Factory {
         WETH = weth_;
     }
 
-    function createRMM(string memory poolName, string memory poolSymbol, address PT, uint256 sigma, uint256 fee)
+    function createRMM(string memory poolName, string memory poolSymbol, uint256 sigma, uint256 fee)
         external
         returns (RMM)
     {
-        RMM rmm = new RMM(poolName, poolSymbol, PT, sigma, fee);
+        RMM rmm = new RMM(poolName, poolSymbol, sigma, fee);
         emit NewPool(msg.sender, address(rmm), poolName, poolSymbol);
         pools.push(address(rmm));
         return rmm;
